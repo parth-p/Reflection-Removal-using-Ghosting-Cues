@@ -4,15 +4,13 @@ I = im2double(imread(imagepath));
 if o==3
     I = rgb2gray(I);
 end
+img_lp = auto_corr_on_laplacian(I);
+% filter_lp=[0 -1 0; -1 4 -1; 0 -1 0];
+% img_lp=imfilter(I,filter_lp);
+% auto_corr=xcorr2(img_lp);
 
-filter_lp=[0 -1 0; -1 4 -1; 0 -1 0];
-img_lp=imfilter(I,filter_lp);
-auto_corr=xcorr2(img_lp);
-
-f = @(x) max(x(:));
-local_maxima = nlfilter(auto_corr_map,[5 5],f);
-f2 = @(x) max(x(x~=max(x)));
-second_local_maxima = nlfilter(auto_corr_map,[5 5],f2);
+lmax1=ordfilt2(img_lp,25, true(5));
+lmax2=ordfilt2(img_lp,24, true(5));
 
 [sx, sy] = size(lmax1);
 % removing 4 maxima's near orign
