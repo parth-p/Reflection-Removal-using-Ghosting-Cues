@@ -1,20 +1,16 @@
-function [I_t I_r ] = patch_gmm(I_in, h, w, c, dx, dy)
+function [I_t I_r ] = patch_gmm(I_in, configs)
 % Setup for patch-based reconstruction 
+h = configs.h;
+w = configs.w;
+c = configs.c;
+dx = configs.dx;
+dy = configs.dy;
 
 % Identity matrix
 Id_mat = speye(h*w, h*w); 
 
-% Ghosting kernel K 
-all_ids = reshape([1:h*w], [h w]);
-self_ids=all_ids;
-negh_ids=ncircshift(all_ids, [dy dx]);
-negh_ids2=circshift(all_ids, [dy dx]);
-ind=ones(h,w);
-indc=ones(h,w)*c;
-indc(negh_ids==0)=0;
-S_plus=sparse(self_ids(:), self_ids(:), ind);
-S_minus=sparse(self_ids(:), negh_ids2(:), indc);
-k_mat=S_plus+S_minus;
+% Ghosting kernel K
+k_mat = get_k(h, w, dx, dy, c); 
 
 % Operator that maps an image to its ghosted version
 A = [Id_mat k_mat]; 
@@ -26,15 +22,16 @@ psize = 8;
 
 num_patches = (h-psize+1)*(w-psize+1);
 
-mask=merge_two_patches(ones(psize^2, num_patches),ones(psize^2, num_patches), h, w, psize);
+mask=merge_two_patches(ones(psize^2, num_patches),...
+            ones(psize^2, num_patches), h, w, psize);
 
 % Use non-negative constraint
-non_negative = true;
+configs.non_negative = true;
 
 % Parameters for half-quadratic regularization method
-beta_factor = 2;
-beta_i = 200;
-dims = [h w];
+configs.beta_factor = 2;
+configs.beta_i = 200;
+configs.dims = [h w];
 
 % Setup for GMM prior
 load GSModel_8x8_200_2M_noDC_zeromean.mat
@@ -53,8 +50,40 @@ fprintf('Init...\n');
 est_t = im2patches(I_t_i, psize);
 est_r = im2patches(I_r_i, psize);
 
-niter = 25;
+niter = 10;
 beta  = configs.beta_i;
 
-% loop for merging 2 best patches
-% ....not commited yet due to some errors
+for i = 1 : niter
+  fprintf('Optimizine %d iter...\n', i);
+  % Merge the patches with bounded least squares
+  f_handle = @(x)(lambda * A'*(A*x) + beta*(mask.*x));
+  sum_piT_zi = merge_two_patches(est_t, est_r, h, w, psize);
+  sum_zi_2 = norm(est_t(:))^2 + norm(est_r(:))^2;
+  z = lambda * A'*I_in(:) + beta * sum_piT_zi; 
+
+  % Non-neg. optimization by L-BFGSB
+  opts    = struct( 'factr', 1e4, 'pgtol', 1e-8, 'm', 50);
+  opts.printEvery     = 50;
+  l = zeros(numel(z),1);
+  u = ones(numel(z),1);
+
+  fcn = @(x)( lambda * norm(A*x - I_in(:))^2 + ...
+      beta*( sum(x.*mask.*x - 2 * x.* sum_piT_zi(:)) + sum_zi_2));
+  grad = @(x)(2*(f_handle(x) - z));
+  fun     = @(x)fminunc_wrapper( x, fcn, grad); 
+  [out, ~, info] = lbfgsb(fun, l, u, opts );
+
+  out = reshape(out, h, w, 2);
+  I_t = out(:,:,1); 
+  I_r = out(:,:,2); 
+
+  % Restore patches using the prior
+  est_t = im2patches(I_t, psize);
+  est_r = im2patches(I_r, psize);
+  noiseSD=(1/beta)^0.5;
+  [est_t t_cost]= aprxMAPGMM(est_t,psize,noiseSD,[h w], GS,excludeList);
+  [est_r r_cost]= aprxMAPGMM(est_r,psize,noiseSD,[h w], GS,excludeList);
+
+  beta = beta*configs.beta_factor;
+
+end
