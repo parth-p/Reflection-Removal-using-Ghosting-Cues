@@ -2,7 +2,8 @@ addpath('epllcode');
 
 % bounded-LBFGS Optimization package
 addpath('lbfgsb/lbfgsb3.0_mex1.2');
-% J = imread(imagepath);
+
+% J = imread('./Test_images/demo_1.png');
 J = imresize(imread(imagepath),[200 300]);
 I = im2double(J);
 % I = imresize(I, 0.25);
